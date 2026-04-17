@@ -25,81 +25,82 @@ const DEFAULT_BANGS = [
   },
 ];
 
-let bangs = DEFAULT_BANGS;
-
 browser.runtime.onInstalled.addListener(() => {
   browser.storage.local.get("bangs").then((result) => {
     if (!result.bangs) {
       browser.storage.local.set({ bangs: DEFAULT_BANGS });
-    } else {
-      bangs = result.bangs;
     }
   });
 
   browser.omnibox.setDefaultSuggestion({
-    description: "Type a keyword (e.g., g, yt) followed by search query",
+    description: "Type a bang keyword then your query (e.g.: yt cats)",
   });
 });
 
-// Keep bangs in sync whenever storage changes
-browser.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.bangs) {
-    bangs = changes.bangs.newValue;
-  }
-});
+function getBangs() {
+  return browser.storage.local.get("bangs").then((result) => {
+    return result.bangs || DEFAULT_BANGS;
+  });
+}
+
+function findBang(bangs, text) {
+  const textLower = text.toLowerCase();
+  return bangs.find((b) => {
+    const keyword = b.keyword.toLowerCase();
+    return textLower.startsWith(keyword + " ") || textLower === keyword;
+  });
+}
+
+function getSearchTerm(text, keyword) {
+  const textLower = text.toLowerCase();
+  const kwLower = keyword.toLowerCase();
+  const afterKeyword = text.slice(kwLower.length);
+  return afterKeyword.startsWith(" ") ? afterKeyword.slice(1) : afterKeyword;
+}
 
 browser.omnibox.onInputChanged.addListener((text, suggest) => {
-  if (!text.trim()) {
+  const trimmed = text.trim();
+  if (!trimmed) {
     suggest([]);
     return;
   }
 
-  const cleanText = text.toLowerCase().replace(/^:/, "");
+  getBangs().then((bangs) => {
+    const textLower = trimmed.toLowerCase();
 
-  const suggestions = bangs
-    .filter((bang) => {
-      const keyword = bang.keyword.toLowerCase();
-      return cleanText.startsWith(keyword + " ") || cleanText === keyword;
-    })
-    .map((bang) => {
-      const keyword = bang.keyword.toLowerCase();
-      const isExact = cleanText === keyword;
+    const suggestions = bangs
+      .filter((bang) => {
+        const keyword = bang.keyword.toLowerCase();
+        return textLower.startsWith(keyword + " ") || textLower === keyword;
+      })
+      .map((bang) => {
+        const keyword = bang.keyword.toLowerCase();
+        const isExact = textLower === keyword;
+        return {
+          content: isExact ? trimmed + " " : trimmed,
+          description: `<match>${bang.keyword}</match> - ${bang.name}`,
+        };
+      });
 
-      return {
-        content: isExact ? text + " " : text,
-        description: `<match>${bang.keyword}</match> - ${bang.name}`,
-      };
-    });
-
-  suggest(suggestions);
+    suggest(suggestions);
+  });
 });
 
 browser.omnibox.onInputEntered.addListener((text) => {
-  let searchText = text.trim();
+  const searchText = text.trim();
 
-  if (searchText.startsWith(":")) {
-    searchText = searchText.slice(1);
-  }
+  getBangs().then((bangs) => {
+    const bang = findBang(bangs, searchText);
 
-  const textLower = searchText.toLowerCase();
-  const bang = bangs.find((b) => {
-    const keyword = b.keyword.toLowerCase();
-    return textLower.startsWith(keyword + " ") || textLower === keyword;
+    if (bang) {
+      const searchTerm = getSearchTerm(searchText, bang.keyword);
+      const searchUrl = bang.url.replace("%s", encodeURIComponent(searchTerm));
+      browser.tabs.update({ url: searchUrl });
+    } else {
+      browser.tabs.update({
+        url:
+          "https://www.google.com/search?q=" + encodeURIComponent(searchText),
+      });
+    }
   });
-
-  if (bang) {
-    const keyword = bang.keyword.toLowerCase();
-    const keywordStart = textLower.indexOf(keyword);
-    const isSpaceAfter =
-      searchText.charAt(keywordStart + keyword.length) === " ";
-    const searchTerm = isSpaceAfter
-      ? searchText.slice(keywordStart + keyword.length + 1)
-      : searchText.slice(keywordStart + keyword.length);
-    const searchUrl = bang.url.replace("%s", encodeURIComponent(searchTerm));
-    browser.tabs.update({ url: searchUrl });
-  } else {
-    browser.tabs.update({
-      url: "https://www.google.com/search?q=" + encodeURIComponent(searchText),
-    });
-  }
 });
