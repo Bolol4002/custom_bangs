@@ -26,16 +26,17 @@ browser.omnibox.onInputChanged.addListener((text, suggest) => {
     return;
   }
   
+  const cleanText = text.toLowerCase().replace(/^:/, '');
+  
   const suggestions = bangs
     .filter(bang => {
-      const searchText = text.toLowerCase();
       const keyword = bang.keyword.toLowerCase();
-      return searchText.startsWith(keyword + ' ') || searchText === keyword;
+      return cleanText.startsWith(keyword + ' ') || cleanText.startsWith(keyword) || cleanText === keyword;
     })
     .map(bang => {
-      const searchText = text.toLowerCase();
+      const cleanSearchText = text.toLowerCase().replace(/^:/, '');
       const keyword = bang.keyword.toLowerCase();
-      const isExact = searchText === keyword;
+      const isExact = cleanSearchText === keyword;
       
       return {
         content: isExact ? text + ' ' : text,
@@ -47,12 +48,26 @@ browser.omnibox.onInputChanged.addListener((text, suggest) => {
 });
 
 browser.omnibox.onInputEntered.addListener((text) => {
-  const searchText = text.trim();
+  let searchText = text.trim();
   
-  const bang = bangs.find(b => searchText.toLowerCase().startsWith(b.keyword.toLowerCase() + ' '));
+  if (searchText.startsWith(':')) {
+    searchText = searchText.slice(1);
+  }
+  
+  const textLower = searchText.toLowerCase();
+  const bang = bangs.find(b => {
+    const keyword = b.keyword.toLowerCase();
+    return textLower.startsWith(keyword + ' ') || textLower.startsWith(keyword);
+  });
   
   if (bang) {
-    const searchTerm = searchText.slice(b.keyword.length + 1);
+    const keyword = bang.keyword;
+    const keywordLower = keyword.toLowerCase();
+    const keywordStart = textLower.indexOf(keywordLower);
+    const isSpaceAfter = searchText.charAt(keywordStart + keyword.length) === ' ';
+    const searchTerm = isSpaceAfter 
+      ? searchText.slice(keywordStart + keyword.length + 1) 
+      : searchText.slice(keywordStart + keyword.length);
     const searchUrl = bang.url.replace('%s', encodeURIComponent(searchTerm));
     browser.tabs.update({ url: searchUrl });
   } else {
